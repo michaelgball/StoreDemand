@@ -118,6 +118,68 @@ plot_modeltime_forecast(.interactive=FALSE)
 plotly::subplot(p1,p3,p2,p4,nrows=2)
 
 
+##ARIMA Models
+library(forecast)
+train <- trainSet %>%
+  filter(store==8,item==43)
+test <- testSet %>%
+  filter(store==8, item==43)
+arima_recipe <- recipe(sales~date, data=train) %>%
+  step_date(date, features="doy") %>%
+  step_date(date, features="month")%>%
+  step_date(date, features="dow")%>%
+  step_lencode_mixed(all_nominal_predictors(), outcome = vars(sales))
+arima_model <- arima_reg(seasonal_period=365,
+                         non_seasonal_ar=5, # default max p to tune
+                         non_seasonal_ma=5, # default max q to tune
+                         seasonal_ar=2, # default max P to tune
+                         seasonal_ma=2, #default max Q to tune
+                         non_seasonal_differences=2, # default max d to tune
+                         seasonal_differences=2 #default max D to tune
+                         ) %>%
+set_engine("auto_arima")
+
+cv_split <- time_series_split(train, assess="3 months", cumulative = TRUE)
+cv_split %>%
+  tk_time_series_cv_plan() %>% #Put into a data frame
+  plot_time_series_cv_plan(date, sales, .interactive=FALSE)
+
+arima_wf <- workflow() %>%
+add_recipe(arima_recipe) %>%
+add_model(arima_model) %>%
+fit(data=training(cv_split))
+
+cv_results <- modeltime_calibrate(arima_wf,new_data = testing(cv_split))
+
+## Visualize CV results
+p3 <- cv_results %>%
+  modeltime_forecast(new_data = testing(cv_split),actual_data = train) %>%
+  plot_modeltime_forecast(.interactive=TRUE)
+
+## Evaluate the accuracy
+cv_results %>%
+  modeltime_accuracy() %>%
+  table_modeltime_accuracy(.interactive = FALSE)
+
+## Refit to all data then forecast
+arima_fullfit <- cv_results %>%
+  modeltime_refit(data = train)
+
+arima_preds <- arima_fullfit %>%
+  modeltime_forecast(new_data= test,h = "3 months") %>%
+  rename(date=.index, sales=.value) %>%
+  select(date, sales) %>%
+  full_join(., y=test, by="date") %>%
+  select(id, sales)
+
+p4 <- arima_fullfit %>%
+  modeltime_forecast(h = "3 months", actual_data = train) %>%
+  plot_modeltime_forecast(.interactive=FALSE)
+
+
+plotly::subplot(p1,p3,p2,p4,nrows=2)
+
+
 
 nStores <- max(trainSet$store)
 nItems <- max(trainSet$item)
