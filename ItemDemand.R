@@ -121,9 +121,9 @@ plotly::subplot(p1,p3,p2,p4,nrows=2)
 ##ARIMA Models
 library(forecast)
 train <- trainSet %>%
-  filter(store==8,item==43)
+  filter(store==4,item==27)
 test <- testSet %>%
-  filter(store==8, item==43)
+  filter(store==4, item==27)
 arima_recipe <- recipe(sales~date, data=train) %>%
   step_date(date, features="doy") %>%
   step_date(date, features="month")%>%
@@ -140,9 +140,6 @@ arima_model <- arima_reg(seasonal_period=365,
 set_engine("auto_arima")
 
 cv_split <- time_series_split(train, assess="3 months", cumulative = TRUE)
-cv_split %>%
-  tk_time_series_cv_plan() %>% #Put into a data frame
-  plot_time_series_cv_plan(date, sales, .interactive=FALSE)
 
 arima_wf <- workflow() %>%
 add_recipe(arima_recipe) %>%
@@ -150,6 +147,36 @@ add_model(arima_model) %>%
 fit(data=training(cv_split))
 
 cv_results <- modeltime_calibrate(arima_wf,new_data = testing(cv_split))
+
+## Visualize CV results
+p1 <- cv_results %>%
+  modeltime_forecast(new_data = testing(cv_split),actual_data = train) %>%
+  plot_modeltime_forecast(.interactive=TRUE)
+
+
+## Refit to all data then forecast
+arima_fullfit <- cv_results %>%
+  modeltime_refit(data = train)
+
+p2 <- arima_fullfit %>%
+  modeltime_forecast(new_data = test, actual_data = train) %>%
+  plot_modeltime_forecast(.interactive=FALSE)
+
+
+plotly::subplot(p1,p3,p2,p4,nrows=2)
+
+
+##Prophet Model
+train <- trainSet %>% filter(store==9, item==4)
+test <- testSet %>% filter(store==9, item==4)
+cv_split <- time_series_split(train, assess="3 months", cumulative = TRUE)
+
+prophet_model <- prophet_reg() %>%
+set_engine(engine = "prophet") %>%
+fit(sales ~ date, data = training(cv_split))
+
+## Cross-validate to tune model
+cv_results <- modeltime_calibrate(prophet_model,new_data = testing(cv_split))
 
 ## Visualize CV results
 p3 <- cv_results %>%
@@ -162,17 +189,17 @@ cv_results %>%
   table_modeltime_accuracy(.interactive = FALSE)
 
 ## Refit to all data then forecast
-arima_fullfit <- cv_results %>%
+prophet_fullfit <- cv_results %>%
   modeltime_refit(data = train)
 
-arima_preds <- arima_fullfit %>%
-  modeltime_forecast(new_data= test,h = "3 months") %>%
+prophet_preds <- prophet_fullfit %>%
+  modeltime_forecast(h = "3 months") %>%
   rename(date=.index, sales=.value) %>%
   select(date, sales) %>%
   full_join(., y=test, by="date") %>%
   select(id, sales)
 
-p4 <- arima_fullfit %>%
+p4 <- prophet_fullfit %>%
   modeltime_forecast(h = "3 months", actual_data = train) %>%
   plot_modeltime_forecast(.interactive=FALSE)
 
